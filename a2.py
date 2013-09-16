@@ -8,16 +8,36 @@ import imageIO as io
 #It should not call the functions or perform any test.
 #Do this in a separate file.
 
+############## HELPER FUNCTIONS ###################
+def imIter(im):
+ for y in xrange(im.shape[0]):
+    for x in xrange(im.shape[1]):
+       yield y, x
+
+def getBlackPadded(im, y, x):
+ if (x<0) or (x>=im.shape[1]) or (y<0) or (y>= im.shape[0]): 
+    return numpy.array([0, 0, 0])
+ else:
+    return im[y, x]
+
+def clipX(im, x):
+   return min(width(im)-1, max(x, 0))
+
+def clipY(im, y):
+   return min(height(im)-1, max(y, 0))
+              
+def getSafePix(im, y, x):
+ return im[clipY(im, y), clipX(im, x)]
+
+def point(x, y):
+   return np.array([x, y])
+              
+################# END HELPER ######################
+
 def check_my_module():
    ''' Fill your signature here. When upload your code, check if the signature is correct'''
-   my_signature='Fill my signature'
+   my_signature='Ryan Lacey'
    return my_signature 
-
-   
-def imIter(im):
-    for y in range(0,im.shape[0]):
-        for x in range(0,im.shape[1]):
-            yield (y,x)
 
 
 def pix(im, y, x, repeatEdge=False):
@@ -31,6 +51,20 @@ def pix(im, y, x, repeatEdge=False):
 def scaleNN(im, k):
     '''Takes an image and a scale factor. Returns an image scaled using nearest neighbor interpolation.
     '''
+    (height, width, depth) = np.shape(im)
+    outHeight = height * k
+    outWidth = width * k
+    pixels = []
+    for i in xrange(outHeight):
+       row = []
+       for j in xrange(outWidth):
+          rgb = im[int(round(i/k))][int(round(i/k))]
+          row.append(rgb)
+       pixels.append(np.array(row))
+    newImg = np.array(pixels)
+    for y, x in imIter(newImg):
+       # do something
+    print (im)
     
 
 def interpolateLin(im, y, x, repeatEdge=False):
