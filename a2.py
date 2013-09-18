@@ -131,12 +131,12 @@ class segment:
     def dist (self, X):
         '''returns distance from point X to the segment (pill shape dist)
         '''
-        return self.uv(X)[1]
+        # return self.uv(X)[1]
+        return min(abs(self.uv(X)[1]), np.dot(X - self.P, X - self.P), np.dot(X - self.Q, X - self.Q))
     
     def uvtox(self,u,v):
         '''take the u,v values and return the corresponding point (that is, the np.array([y, x]))
         '''
-        # return (self.P + u * (self.Q - self.P) + v * np.array([-self.Q[1], self.Q[0]])) / np.dot(self.Q - self.P, self.Q - self.P) ** 0.5
         return self.P + u * self.PQ + (v * self.perpPQ) / np.dot(self.PQ, self.PQ) ** 0.5
 
 
@@ -153,15 +153,28 @@ def warpBy1(im, segmentBefore, segmentAfter):
     return out
 
 
-def weight(s, X):
+def weight(s, X,  a=10, b=1, p=1):
     '''Returns the weight of segment s on point X
     '''
     length = np.dot(s.PQ, s.PQ) ** 0.5
-    return (length / (10 * s.dist(X))) ** 1
+    return (length ** p / (a + s.dist(X))) ** b
 
 def warp(im, segmentsBefore, segmentsAfter, a=10, b=1, p=1):
     '''Takes an image, a list of before segments, a list of after segments, and the parameters a,b,p (see Beier)
     '''
+    out = im.copy()
+    for y, x in imIter(out):
+        DSUM = (0,0)
+        weightsum = 0
+        for i, segment in enumerate(segmentsAfter):
+            u, v = segment.uv(np.array([y,x]))
+            yp, xp = segmentsBefore[i].uvtox(u,v)
+            displacement = np.array([yp-y, xp-x])
+            w = weight(segment, np.array([y,x]))
+            DSUM  += displacement * w
+            weightsum += w
+        out[y,x] =  interpolateLin(im, y+DSUM[0]/weightsum, x+DSUM[1]/weightsum, True) 
+    return out
 
 
 def morph(im1, im2, segmentsBefore, segmentsAfter, N=1, a=10, b=1, p=1):
@@ -170,5 +183,24 @@ def morph(im1, im2, segmentsBefore, segmentsAfter, N=1, a=10, b=1, p=1):
     '''
     sequence=list()
     sequence.append(im1.copy())
-    #add the rest of the morph images
-    return sequence
+    seqFromStart = []
+    seqFromEnd = []
+    segmentDifferences = []
+    stepSize = 1.0 / (N+1)
+    for i in range(len(segmentsBefore)):
+        (diffStartX, diffStartY) = segmentsAfter[i].P  - segmentsBefore[i].P
+        (diffEndX, DiffEndY) = segmentsAfter[i].Q - segmentsBefore[i].Q
+        segmentDifferences.append(segment(diffStartX, diffStartY, diffEndX, DiffEndY))
+    for i in xrange(N):
+        fromStart = []
+        fromEnd = []
+        for diff in segmentDifferences:
+            print '\n\n================================================', segmentsBefore[i], diff.P, type(diff), type(diff.P), stepSize, i+1
+            fromStart.append(segmentsBefore[i].P[1]+diff.P*stepSize*(i+1), segmentsBefore[i].P[0]+ diff.P*stepSize*(i+1), segmentsBefore[i].Q+ diff.Q*stepSize*(i+1), segmentsBefore+ diff.Q*stepSize*(i+1))
+            fromEnd.append(segmentsAfter[i].P[1]-diff.P*stepSize*(i+1), segmentsAfter[i].P[0]+ diff.P*stepSize*(i+1), segmentsAfter[i].Q+ diff.Q*stepSize*(i+1), segmentsAfter+ diff.Q*stepSize*(i+1))
+            # fromStart.append(segmentsBefore[i] + diff.P*stepSize*(i+1))
+            # fromEnd.append(segmentAfter[i] - diff.Q*stepSize*i)
+        seqFromStart.append(morph(im1.copy(), segmentsBefore, fromStart))
+        seqFromEnd.append(morph(im2.copy(), segmentAfter, fromEnd))
+    sequence.append(im2.copy())
+    return sequence, seqFromStart, seqFromEnd
