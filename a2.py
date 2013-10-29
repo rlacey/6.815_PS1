@@ -57,7 +57,7 @@ def scaleNN(im, k):
     '''
     out = io.constantIm(im.shape[0]*k, im.shape[1]*k, 0.0)
     for y, x in imIter(out):
-        out[y,x]=im[clipY(im, round(y/k)), clipX(im, round(x/k))]
+        out[y,x]=im[clipY(im,round(y/k)), clipX(im,round(x/k))]
     return out
     
 
@@ -65,25 +65,25 @@ def interpolateLin(im, y, x, repeatEdge=False):
     '''takes an image, y and x coordinates, and a bool
         returns the interpolated pixel value using bilinear interpolation
     '''
+    # R and P notation from http://en.wikipedia.org/wiki/Bilinear_interpolation
     # Get nearby neighbor coordinates
     leftX = int(math.floor(x))    
     rightX = int(math.ceil(x))
     bottomY = int(math.floor(y))
     topY = int(math.ceil(y))
-    # Interpolate x
+    # Interpolate x's
     if leftX == rightX:
-        topDiff = pix(im, topY, x, repeatEdge)
-        botDiff = pix(im, bottomY, x, repeatEdge)
+        R2 = pix(im, topY, x, repeatEdge)
+        R1 = pix(im, bottomY, x, repeatEdge)
     else:
-        topDiff = pix(im, topY, rightX, repeatEdge) * (x - leftX) + pix(im, topY, leftX, repeatEdge) * (rightX - x)
-        botDiff = pix(im, bottomY, rightX, repeatEdge) * (x - leftX) + pix(im, bottomY, leftX, repeatEdge) * (rightX - x)
-    # interpolate temp x's
+        R2 = pix(im, topY, rightX, repeatEdge) * (x - leftX) + pix(im, topY, leftX, repeatEdge) * (rightX - x)
+        R1 = pix(im, bottomY, rightX, repeatEdge) * (x - leftX) + pix(im, bottomY, leftX, repeatEdge) * (rightX - x)
+    # interpolate midpoints (R1 and R2)
     if bottomY == topY:
-        yDiff = topDiff
+        P = R2
     else:
-        yDiff = botDiff * (topY - y) + topDiff * (y - bottomY)
-    return yDiff
-
+        P = R1 * (topY - y) + R2 * (y - bottomY)
+    return P
 
 
 def scaleLin(im, k):
@@ -92,8 +92,7 @@ def scaleLin(im, k):
     (height, width, depth) = np.shape(im)
     img = io.constantIm(im.shape[0]*k, im.shape[1]*k, 0.0)
     for y, x in imIter(img):
-        # print img[y][x], interpolateLin(im, y, x, False), '\n'
-        img[y][x] = interpolateLin(im, y/k, x/k, False)
+        img[y][x] = interpolateLin(im, y/k, x/k, True)
     return img
 
 
@@ -107,7 +106,7 @@ def rotate(im, theta):
     for y, x in imIter(im):
         xp = centerX + (x - centerX) * math.cos(theta) - (y - centerY) * math.sin(theta)
         yp = centerY + (x - centerX) * math.sin(theta) + (y - centerY) * math.cos(theta)
-        img[y][x] = interpolateLin(im, yp, xp, False) #im[clipY(img, round(yp))][clipX(img, round(xp))]
+        img[y][x] = interpolateLin(im, yp, xp, False)
     return img
 
 
@@ -131,15 +130,18 @@ class segment:
     def dist (self, X):
         '''returns distance from point X to the segment (pill shape dist)
         '''
-        # return self.uv(X)[1]
-        return min(abs(self.uv(X)[1]), np.dot(X - self.P, X - self.P), np.dot(X - self.Q, X - self.Q))
+        # if X within perpendicular to PQ, return distance to perpendicular location
+        uvToX = abs(self.uv(X)[1])
+        # if X outside perpendicular range of PQ, return distance to point
+        pToX = np.dot(X - self.P, X - self.P) ** 0.5
+        qToX = np.dot(X - self.Q, X - self.Q) ** 0.5
+        return min(uvToX, pToX, qToX)
     
     def uvtox(self,u,v):
         '''take the u,v values and return the corresponding point (that is, the np.array([y, x]))
         '''
         return self.P + u * self.PQ + (v * self.perpPQ) / np.dot(self.PQ, self.PQ) ** 0.5
-
-
+    
 
 def warpBy1(im, segmentBefore, segmentAfter):
     '''Takes an image, one before segment, and one after segment. 
@@ -147,8 +149,8 @@ def warpBy1(im, segmentBefore, segmentAfter):
     '''
     out = im.copy()
     for y, x in imIter(im):
-        u, v = segmentAfter.uv(np.array([y,x]))
-        yp, xp = segmentBefore.uvtox(u, v)
+        u,v = segmentAfter.uv(np.array([y,x]))
+        yp,xp = segmentBefore.uvtox(u, v)
         out[y][x] = interpolateLin(im, yp, xp, True)
     return out
 
@@ -159,6 +161,7 @@ def weight(s, X,  a=10, b=1, p=1):
     length = np.dot(s.PQ, s.PQ) ** 0.5
     return (length ** p / (a + s.dist(X))) ** b
 
+
 def warp(im, segmentsBefore, segmentsAfter, a=10, b=1, p=1):
     '''Takes an image, a list of before segments, a list of after segments, and the parameters a,b,p (see Beier)
     '''
@@ -167,10 +170,10 @@ def warp(im, segmentsBefore, segmentsAfter, a=10, b=1, p=1):
         DSUM = (0,0)
         weightsum = 0
         for i, segment in enumerate(segmentsAfter):
-            u, v = segment.uv(np.array([y,x]))
-            yp, xp = segmentsBefore[i].uvtox(u,v)
-            displacement = np.array([yp-y, xp-x])
-            w = weight(segment, np.array([y,x]))
+            u,v = segment.uv(point(y,x))
+            yp,xp = segmentsBefore[i].uvtox(u,v)
+            displacement = point(yp-y, xp-x)
+            w = weight(segment, point(y,x))
             DSUM  += displacement * w
             weightsum += w
         out[y,x] =  interpolateLin(im, y+DSUM[0]/weightsum, x+DSUM[1]/weightsum, True) 
@@ -183,24 +186,17 @@ def morph(im1, im2, segmentsBefore, segmentsAfter, N=1, a=10, b=1, p=1):
     '''
     sequence=list()
     sequence.append(im1.copy())
-    seqFromStart = []
-    seqFromEnd = []
-    segmentDifferences = []
-    stepSize = 1.0 / (N+1)
-    for i in range(len(segmentsBefore)):
-        (diffStartX, diffStartY) = segmentsAfter[i].P  - segmentsBefore[i].P
-        (diffEndX, DiffEndY) = segmentsAfter[i].Q - segmentsBefore[i].Q
-        segmentDifferences.append(segment(diffStartX, diffStartY, diffEndX, DiffEndY))
     for i in xrange(N):
-        fromStart = []
-        fromEnd = []
-        for diff in segmentDifferences:
-            print '\n\n================================================', segmentsBefore[i], diff.P, type(diff), type(diff.P), stepSize, i+1
-            fromStart.append(segmentsBefore[i].P[1]+diff.P*stepSize*(i+1), segmentsBefore[i].P[0]+ diff.P*stepSize*(i+1), segmentsBefore[i].Q+ diff.Q*stepSize*(i+1), segmentsBefore+ diff.Q*stepSize*(i+1))
-            fromEnd.append(segmentsAfter[i].P[1]-diff.P*stepSize*(i+1), segmentsAfter[i].P[0]+ diff.P*stepSize*(i+1), segmentsAfter[i].Q+ diff.Q*stepSize*(i+1), segmentsAfter+ diff.Q*stepSize*(i+1))
-            # fromStart.append(segmentsBefore[i] + diff.P*stepSize*(i+1))
-            # fromEnd.append(segmentAfter[i] - diff.Q*stepSize*i)
-        seqFromStart.append(morph(im1.copy(), segmentsBefore, fromStart))
-        seqFromEnd.append(morph(im2.copy(), segmentAfter, fromEnd))
+        weight = 1.0 / (N+1) * (i+1)
+        weightedSegments = []
+        for j in xrange(len(segmentsBefore)):
+            seg1 = segmentsBefore[j].P[1]*(1-weight), segmentsBefore[j].P[0]*(1-weight), segmentsBefore[j].Q[1]*(1-weight), segmentsBefore[j].Q[0]*(1-weight)
+            seg2 = segmentsAfter[j].P[1]*(weight), segmentsAfter[j].P[0]*(weight), segmentsAfter[j].Q[1]*(weight), segmentsAfter[j].Q[0]*(weight)
+            weightedSegment = segment(seg1[0]+seg2[0], seg1[1]+seg2[1], seg1[2]+seg2[2], seg1[3]+seg2[3])
+            weightedSegments.append(weightedSegment)
+        warpFromStart = warp(im1, segmentsBefore, weightedSegments)
+        warpFromEnd = warp(im2, segmentsAfter, weightedSegments)
+        morphedImg = warpFromStart * (1-weight) + warpFromEnd * weight
+        sequence.append(morphedImg)
     sequence.append(im2.copy())
-    return sequence, seqFromStart, seqFromEnd
+    return sequence
